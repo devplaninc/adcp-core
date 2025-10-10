@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/devplaninc/adcp-core/adcp/utils"
 	"github.com/devplaninc/adcp/clients/go/adcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,20 +73,23 @@ func TestContext_FetchContent_TextSource(t *testing.T) {
 
 func TestContext_ExecuteCommand_Success(t *testing.T) {
 	c := &Context{}
-	content, err := c.executeCommand(context.Background(), "echo 'test output'")
+	_ = c
+	content, err := utils.ExecuteCommand(context.Background(), "echo 'test output'")
 	require.NoError(t, err)
 	assert.Equal(t, "test output\n", content)
 }
 
 func TestContext_ExecuteCommand_EmptyCommand(t *testing.T) {
 	c := &Context{}
-	_, err := c.executeCommand(context.Background(), "")
+	_ = c
+	_, err := utils.ExecuteCommand(context.Background(), "")
 	assert.Error(t, err, "expected error for empty command")
 }
 
 func TestContext_ExecuteCommand_FailedCommand(t *testing.T) {
 	c := &Context{}
-	_, err := c.executeCommand(context.Background(), "exit 1")
+	_ = c
+	_, err := utils.ExecuteCommand(context.Background(), "exit 1")
 	assert.Error(t, err, "expected error for failed command")
 }
 
@@ -98,25 +102,28 @@ func TestContext_FetchGithub_Success(t *testing.T) {
 	defer server.Close()
 
 	c := &Context{}
+	_ = c
 	ref := &adcp.GitReference{}
 	// Use raw.githubusercontent.com format to bypass URL conversion
 	ref.SetPath(server.URL)
 
-	content, err := c.fetchGithub(context.Background(), ref)
+	content, err := utils.FetchGithub(context.Background(), ref)
 	require.NoError(t, err)
 	assert.Equal(t, "file content from github", content)
 }
 
 func TestContext_FetchGithub_NilReference(t *testing.T) {
 	c := &Context{}
-	_, err := c.fetchGithub(context.Background(), nil)
+	_ = c
+	_, err := utils.FetchGithub(context.Background(), nil)
 	assert.Error(t, err, "expected error for nil reference")
 }
 
 func TestContext_FetchGithub_EmptyPath(t *testing.T) {
 	c := &Context{}
+	_ = c
 	ref := adcp.GitReference_builder{}.Build()
-	_, err := c.fetchGithub(context.Background(), ref)
+	_, err := utils.FetchGithub(context.Background(), ref)
 	assert.Error(t, err, "expected error for empty path")
 }
 
@@ -128,10 +135,11 @@ func TestContext_FetchGithub_HTTPError(t *testing.T) {
 	defer server.Close()
 
 	c := &Context{}
+	_ = c
 	ref := &adcp.GitReference{}
 	ref.SetPath(server.URL + "/notfound")
 
-	_, err := c.fetchGithub(context.Background(), ref)
+	_, err := utils.FetchGithub(context.Background(), ref)
 	assert.Error(t, err, "expected error for 404 status")
 }
 

@@ -1,7 +1,10 @@
 package utils
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 
 	"github.com/devplaninc/adcp/clients/go/adcp"
@@ -62,4 +65,44 @@ func ConvertToRawURL(githubPath string, version *adcp.GitVersion) (string, error
 	}
 
 	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, filePath), nil
+}
+
+// FetchGithub fetches the content of a GitHub file reference using a raw content URL.
+// If the provided ref.Path is not a github.com URL, it is used as-is.
+func FetchGithub(ctx context.Context, ref *adcp.GitReference) (string, error) {
+	if ref == nil {
+		return "", fmt.Errorf("github reference cannot be nil")
+	}
+
+	githubPath := ref.GetPath()
+	if githubPath == "" {
+		return "", fmt.Errorf("github path cannot be empty")
+	}
+
+	url, err := ConvertToRawURL(githubPath, ref.GetVersion())
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch from github: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github fetch returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return string(body), nil
 }
