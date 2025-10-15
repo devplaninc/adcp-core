@@ -398,3 +398,234 @@ func TestIDE_Materialize_Permissions_NoExistingFile(t *testing.T) {
 	assert.Empty(t, parsed.Permissions.Deny)
 	assert.Empty(t, parsed.Permissions.Ask)
 }
+
+func TestIDE_Materialize_McpServers_AutoAddPermissions(t *testing.T) {
+	// Setup: Create a temporary directory
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0755))
+
+	// Change to temp directory for the test
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// Define MCP servers without explicit permissions
+	g := &IDE{}
+	ide := adcp.Ide_builder{
+		Mcp: adcp.Mcp_builder{Servers: map[string]*adcp.McpServer{
+			"github":     adcp.McpServer_builder{Http: adcp.HttpMcpServer_builder{Url: "https://api.github.com/mcp/"}.Build()}.Build(),
+			"devplan":    adcp.McpServer_builder{Stdio: adcp.StdioMcpServer_builder{Command: "devplan mcp"}.Build()}.Build(),
+			"filesystem": adcp.McpServer_builder{Stdio: adcp.StdioMcpServer_builder{Command: "npx @mcp/server-filesystem"}.Build()}.Build(),
+		}}.Build(),
+	}.Build()
+
+	// Execute
+	res, err := g.Materialize(context.Background(), ide)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// Verify settings.local.json was created with MCP permissions
+	var settingsContent string
+	for _, e := range res.GetEntries() {
+		if e.GetFile().GetPath() == ".claude/settings.local.json" {
+			settingsContent = e.GetFile().GetContent()
+			break
+		}
+	}
+	require.NotEmpty(t, settingsContent, "settings.local.json should be created even without explicit permissions")
+
+	var parsed struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+			Ask   []string `json:"ask"`
+		} `json:"permissions"`
+		EnabledMcpjsonServers []string `json:"enabledMcpjsonServers"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(settingsContent), &parsed))
+
+	// Verify MCP server names were automatically added to enabledMcpjsonServers
+	assert.Len(t, parsed.EnabledMcpjsonServers, 3, "should have all 3 MCP servers enabled")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "github", "github MCP server should be enabled")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "devplan", "devplan MCP server should be enabled")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "filesystem", "filesystem MCP server should be enabled")
+
+	// Verify MCP server permissions were also added to allow list with mcp__ prefix
+	assert.Len(t, parsed.Permissions.Allow, 3, "should have mcp__ permissions for all 3 MCP servers")
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__github", "mcp__github permission should be in allow list")
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__devplan", "mcp__devplan permission should be in allow list")
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__filesystem", "mcp__filesystem permission should be in allow list")
+}
+
+func TestIDE_Materialize_McpServers_MergeWithExistingPermissions(t *testing.T) {
+	// Setup: Create a temporary directory with existing permissions
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0755))
+
+	// Change to temp directory for the test
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// Create existing settings with some permissions
+	existingSettings := `{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Read(/etc/hosts)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), []byte(existingSettings), 0644))
+
+	// Define MCP servers and additional permissions
+	g := &IDE{}
+	allowBash := adcp.OperationPermission_builder{Bash: strPtr("go test:*")}.Build()
+
+	ide := adcp.Ide_builder{
+		Permissions: adcp.Permissions_builder{
+			Allow: []*adcp.OperationPermission{allowBash},
+		}.Build(),
+		Mcp: adcp.Mcp_builder{Servers: map[string]*adcp.McpServer{
+			"github":  adcp.McpServer_builder{Http: adcp.HttpMcpServer_builder{Url: "https://api.github.com/mcp/"}.Build()}.Build(),
+			"devplan": adcp.McpServer_builder{Stdio: adcp.StdioMcpServer_builder{Command: "devplan mcp"}.Build()}.Build(),
+		}}.Build(),
+	}.Build()
+
+	// Execute
+	res, err := g.Materialize(context.Background(), ide)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// Verify settings were merged
+	var settingsContent string
+	for _, e := range res.GetEntries() {
+		if e.GetFile().GetPath() == ".claude/settings.local.json" {
+			settingsContent = e.GetFile().GetContent()
+			break
+		}
+	}
+	require.NotEmpty(t, settingsContent)
+
+	var parsed struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+			Ask   []string `json:"ask"`
+		} `json:"permissions"`
+		EnabledMcpjsonServers []string `json:"enabledMcpjsonServers"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(settingsContent), &parsed))
+
+	// Verify existing permissions are preserved
+	assert.Contains(t, parsed.Permissions.Allow, "Bash(git status:*)", "existing permission should be preserved")
+	assert.Contains(t, parsed.Permissions.Allow, "Read(/etc/hosts)", "existing permission should be preserved")
+
+	// Verify new explicit permission was added
+	assert.Contains(t, parsed.Permissions.Allow, "Bash(go test:*)", "new permission should be added")
+
+	// Verify MCP permissions were added to allow list
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__github", "mcp__github permission should be in allow list")
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__devplan", "mcp__devplan permission should be in allow list")
+
+	// Verify total permission count (existing + new + MCP)
+	assert.Len(t, parsed.Permissions.Allow, 5, "should have 2 existing + 1 new + 2 MCP permissions")
+
+	// Verify MCP servers were added to enabledMcpjsonServers
+	assert.Len(t, parsed.EnabledMcpjsonServers, 2, "should have 2 MCP servers enabled")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "github", "github MCP server should be enabled")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "devplan", "devplan MCP server should be enabled")
+}
+
+func TestIDE_Materialize_McpServers_PreserveExistingMcpPermissions(t *testing.T) {
+	// Setup: Create a temporary directory with existing MCP permissions
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0755))
+
+	// Change to temp directory for the test
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tempDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// Create existing settings with MCP server already enabled and in allow list
+	existingSettings := `{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "mcp__github"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "enabledMcpjsonServers": ["github"]
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), []byte(existingSettings), 0644))
+
+	// Define the same MCP server again (should not duplicate)
+	g := &IDE{}
+	ide := adcp.Ide_builder{
+		Mcp: adcp.Mcp_builder{Servers: map[string]*adcp.McpServer{
+			"github": adcp.McpServer_builder{Http: adcp.HttpMcpServer_builder{Url: "https://api.github.com/mcp/"}.Build()}.Build(),
+		}}.Build(),
+	}.Build()
+
+	// Execute
+	res, err := g.Materialize(context.Background(), ide)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// Verify no duplicate MCP server
+	var settingsContent string
+	for _, e := range res.GetEntries() {
+		if e.GetFile().GetPath() == ".claude/settings.local.json" {
+			settingsContent = e.GetFile().GetContent()
+			break
+		}
+	}
+	require.NotEmpty(t, settingsContent)
+
+	var parsed struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+			Ask   []string `json:"ask"`
+		} `json:"permissions"`
+		EnabledMcpjsonServers []string `json:"enabledMcpjsonServers"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(settingsContent), &parsed))
+
+	// Verify permissions remain with no duplicates
+	assert.Len(t, parsed.Permissions.Allow, 2, "should have 2 permissions (no duplicate mcp__github)")
+	assert.Contains(t, parsed.Permissions.Allow, "Bash(git status:*)")
+	assert.Contains(t, parsed.Permissions.Allow, "mcp__github")
+
+	// Count occurrences in allow list to ensure no duplicates
+	allowCount := 0
+	for _, p := range parsed.Permissions.Allow {
+		if p == "mcp__github" {
+			allowCount++
+		}
+	}
+	assert.Equal(t, 1, allowCount, "mcp__github permission should appear only once in allow list")
+
+	// Verify no duplicate MCP server in enabledMcpjsonServers
+	assert.Len(t, parsed.EnabledMcpjsonServers, 1, "should have 1 enabled MCP server (no duplicate)")
+	assert.Contains(t, parsed.EnabledMcpjsonServers, "github")
+
+	// Count occurrences in enabledMcpjsonServers to ensure no duplicates
+	enabledCount := 0
+	for _, s := range parsed.EnabledMcpjsonServers {
+		if s == "github" {
+			enabledCount++
+		}
+	}
+	assert.Equal(t, 1, enabledCount, "github server should appear only once in enabledMcpjsonServers")
+}

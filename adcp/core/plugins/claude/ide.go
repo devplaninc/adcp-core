@@ -16,7 +16,7 @@ type IDE struct{}
 // Materialize converts an Ide configuration into a set of materialized files for Claude Code.
 // It produces:
 // - .claude/commands/<name>.md files for each command
-// - .claude/settings.local.json for permissions (allow/deny)
+// - .claude/settings.local.json for permissions (allow/deny) including MCP server permissions
 // - .claude/mcp.local.json for MCP server definitions
 func (g *IDE) Materialize(ctx context.Context, ide *adcp.Ide) (*adcp.MaterializedResult, error) {
 	if ide == nil {
@@ -34,9 +34,18 @@ func (g *IDE) Materialize(ctx context.Context, ide *adcp.Ide) (*adcp.Materialize
 		entries = append(entries, cmdEntries...)
 	}
 
-	// Permissions -> .claude/settings.local.json
-	if ide.HasPermissions() {
-		permEntries, err := g.materializePermissions(ide.GetPermissions())
+	// Extract MCP server names for permissions
+	var mcpServerNames []string
+	if ide.HasMcp() {
+		for name := range ide.GetMcp().GetServers() {
+			mcpServerNames = append(mcpServerNames, name)
+		}
+	}
+
+	// Permissions -> .claude/settings.local.json (including MCP server permissions)
+	if ide.HasPermissions() || len(mcpServerNames) > 0 {
+		perms := ide.GetPermissions()
+		permEntries, err := g.materializePermissions(perms, mcpServerNames)
 		if err != nil {
 			return nil, err
 		}
@@ -83,11 +92,8 @@ func (g *IDE) materializeCommands(ctx context.Context, commands *adcp.Commands) 
 	return entries, nil
 }
 
-func (g *IDE) materializePermissions(perms *adcp.Permissions) ([]*adcp.MaterializedResult_Entry, error) {
+func (g *IDE) materializePermissions(perms *adcp.Permissions, mcpServerNames []string) ([]*adcp.MaterializedResult_Entry, error) {
 	var entries []*adcp.MaterializedResult_Entry
-	if perms == nil {
-		return entries, nil
-	}
 
 	// Read existing file content if it exists
 	existingContent := ""
@@ -96,7 +102,7 @@ func (g *IDE) materializePermissions(perms *adcp.Permissions) ([]*adcp.Materiali
 		existingContent = string(data)
 	}
 
-	settingsContent, err := buildClaudeSettingsJSON(perms, existingContent)
+	settingsContent, err := buildClaudeSettingsJSON(perms, mcpServerNames, existingContent)
 	if err != nil {
 		return nil, err
 	}
@@ -154,17 +160,14 @@ type claudeSettings struct {
 		Deny  []string `json:"deny"`
 		Ask   []string `json:"ask"`
 	} `json:"permissions"`
+	EnabledMcpjsonServers []string `json:"enabledMcpjsonServers,omitempty"`
 }
 
 type claudeMcp struct {
 	McpServers map[string]map[string]string `json:"mcpServers"`
 }
 
-func buildClaudeSettingsJSON(perms *adcp.Permissions, existingContent string) (string, error) {
-	if perms == nil {
-		return "", fmt.Errorf("permissions cannot be nil")
-	}
-
+func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, existingContent string) (string, error) {
 	var s claudeSettings
 
 	// Parse existing content if provided
@@ -175,26 +178,54 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions, existingContent string) (s
 		}
 	}
 
+	// Ensure non-nil slices
+	if s.Permissions.Allow == nil {
+		s.Permissions.Allow = []string{}
+	}
+	if s.Permissions.Deny == nil {
+		s.Permissions.Deny = []string{}
+	}
+	if s.Permissions.Ask == nil {
+		s.Permissions.Ask = []string{}
+	}
+	if s.EnabledMcpjsonServers == nil {
+		s.EnabledMcpjsonServers = []string{}
+	}
+
 	// Build new permissions from input
 	var newAllow []string
-	for _, p := range perms.GetAllow() {
-		if !p.HasType() {
-			continue
+	if perms != nil {
+		for _, p := range perms.GetAllow() {
+			if !p.HasType() {
+				continue
+			}
+			newAllow = append(newAllow, formatPermission(p))
 		}
-		newAllow = append(newAllow, formatPermission(p))
 	}
 
 	var newDeny []string
-	for _, p := range perms.GetDeny() {
-		if !p.HasType() {
-			continue
+	if perms != nil {
+		for _, p := range perms.GetDeny() {
+			if !p.HasType() {
+				continue
+			}
+			newDeny = append(newDeny, formatPermission(p))
 		}
-		newDeny = append(newDeny, formatPermission(p))
 	}
+
+	// Add MCP servers to allow list as mcp__<name>
+	var mcpAllowPermissions []string
+	for _, serverName := range mcpServerNames {
+		mcpAllowPermissions = append(mcpAllowPermissions, fmt.Sprintf("mcp__%s", serverName))
+	}
+	newAllow = append(newAllow, mcpAllowPermissions...)
 
 	// Merge with existing permissions (deduplicate)
 	s.Permissions.Allow = mergeUniqueStrings(s.Permissions.Allow, newAllow)
 	s.Permissions.Deny = mergeUniqueStrings(s.Permissions.Deny, newDeny)
+
+	// Add MCP server names to enabledMcpjsonServers
+	s.EnabledMcpjsonServers = mergeUniqueStrings(s.EnabledMcpjsonServers, mcpServerNames)
 
 	b, err := json.MarshalIndent(&s, "", "  ")
 	if err != nil {
