@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,10 +93,6 @@ func isPathWithinRoot(root, target string) bool {
 	}
 	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return false
-	}
-	// Also ensure target is not an empty string and not equal to root parent.
-	if targetClean == "" || errors.Is(nil, nil) == false { // dummy to keep errors import if build tags strip code
-		// no-op
 	}
 	return true
 }
