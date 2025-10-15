@@ -27,7 +27,7 @@ func TestContext_IntegrationTest_TextSource(t *testing.T) {
 		},
 	}.Build()
 
-	result, err := c.Materialize(context.Background(), ctx)
+	result, err := c.Materialize(context.Background(), ctx, nil)
 	require.NoError(t, err)
 	require.Len(t, result.GetEntries(), 1)
 
@@ -52,7 +52,7 @@ func TestContext_IntegrationTest_CmdSource(t *testing.T) {
 		},
 	}.Build()
 
-	result, err := c.Materialize(context.Background(), ctx)
+	result, err := c.Materialize(context.Background(), ctx, nil)
 	require.NoError(t, err)
 	require.Len(t, result.GetEntries(), 1)
 
@@ -83,7 +83,7 @@ func TestContext_IntegrationTest_MultipleEntries(t *testing.T) {
 		},
 	}.Build()
 
-	result, err := c.Materialize(context.Background(), ctx)
+	result, err := c.Materialize(context.Background(), ctx, nil)
 	require.NoError(t, err)
 	require.Len(t, result.GetEntries(), 2)
 
@@ -122,7 +122,7 @@ func TestContext_IntegrationTest_FailFast(t *testing.T) {
 		},
 	}.Build()
 
-	_, err := c.Materialize(context.Background(), ctx)
+	_, err := c.Materialize(context.Background(), ctx, nil)
 	assert.Error(t, err, "expected error due to failed command")
 }
 
@@ -142,7 +142,7 @@ func TestContext_IntegrationTest_RealGithubFetch(t *testing.T) {
 		},
 	}.Build()
 
-	result, err := c.Materialize(context.Background(), ctx)
+	result, err := c.Materialize(context.Background(), ctx, nil)
 	require.NoError(t, err, "unexpected error fetching from GitHub")
 	require.Len(t, result.GetEntries(), 1)
 

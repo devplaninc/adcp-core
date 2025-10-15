@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/devplaninc/adcp-core/adcp/utils"
+	utils2 "github.com/devplaninc/adcp-core/adcp/core/utils"
 	"github.com/devplaninc/adcp/clients/go/adcp"
 )
 
@@ -123,9 +123,9 @@ func (g *IDE) fetchCommandContent(ctx context.Context, from *adcp.CommandFrom) (
 	case adcp.CommandFrom_Text_case:
 		return from.GetText(), nil
 	case adcp.CommandFrom_Cmd_case:
-		return utils.ExecuteCommand(ctx, from.GetCmd())
+		return utils2.ExecuteCommand(ctx, from.GetCmd())
 	case adcp.CommandFrom_Github_case:
-		return utils.FetchGithub(ctx, from.GetGithub())
+		return utils2.FetchGithub(ctx, from.GetGithub())
 	default:
 		return "", fmt.Errorf("unknown or unset command source type")
 	}

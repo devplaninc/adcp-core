@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/devplaninc/adcp-core/adcp/generators"
-	"github.com/devplaninc/adcp-core/adcp/plugins/claude"
+	"github.com/devplaninc/adcp-core/adcp/core"
+	"github.com/devplaninc/adcp-core/adcp/core/generators"
+	"github.com/devplaninc/adcp-core/adcp/core/plugins/claude"
+	"github.com/devplaninc/adcp-core/adcp/core/prefetch"
 	"github.com/devplaninc/adcp/clients/go/adcp"
 )
 
@@ -15,13 +17,22 @@ func (r *Recipe) Materialize(ctx context.Context, recipe *adcp.Recipe) (*adcp.Ma
 	if recipe == nil {
 		return nil, fmt.Errorf("recipe cannot be nil")
 	}
+	genCtx := &core.GenerationContext{}
+	if pf := recipe.GetPrefetch(); pf != nil {
+		p := prefetch.Processor{}
+		entries, err := p.Process(ctx, pf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process prefetch: %w", err)
+		}
+		genCtx.Prefetched = entries
+	}
 
 	var resultEntries []*adcp.MaterializedResult_Entry
 
 	// Materialize context entries if present
 	if recipe.HasContext() {
 		contextGen := &generators.Context{}
-		contextResult, err := contextGen.Materialize(ctx, recipe.GetContext())
+		contextResult, err := contextGen.Materialize(ctx, recipe.GetContext(), genCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to materialize context: %w", err)
 		}

@@ -3,7 +3,7 @@ module github.com/devplaninc/adcp-core
 go 1.25.1
 
 require (
-	github.com/devplaninc/adcp/clients/go v0.1.3
+	github.com/devplaninc/adcp/clients/go v0.1.4
 	github.com/stretchr/testify v1.11.1
 )
 
