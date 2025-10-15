@@ -239,7 +239,7 @@ func TestRecipe_Materialize_ComplexRecipe(t *testing.T) {
 	assert.Contains(t, settings.Permissions.Deny, "Write(**/secrets/**)")
 
 	// Verify MCP
-	mcpContent := entries[".claude/mcp.local.json"]
+	mcpContent := entries[".mcp.json"]
 	require.NotEmpty(t, mcpContent)
 
 	var mcp struct {
@@ -410,7 +410,7 @@ func TestRecipe_Materialize_MultipleMcpServers(t *testing.T) {
 
 	var mcpContent string
 	for _, e := range result.GetEntries() {
-		if e.GetFile().GetPath() == ".claude/mcp.local.json" {
+		if e.GetFile().GetPath() == ".mcp.json" {
 			mcpContent = e.GetFile().GetContent()
 			break
 		}

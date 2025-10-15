@@ -17,7 +17,7 @@ type IDE struct{}
 // It produces:
 // - .claude/commands/<name>.md files for each command
 // - .claude/settings.local.json for permissions (allow/deny) including MCP server permissions
-// - .claude/mcp.local.json for MCP server definitions
+// - .mcp.json for MCP server definitions
 func (g *IDE) Materialize(ctx context.Context, ide *adcp.Ide) (*adcp.MaterializedResult, error) {
 	if ide == nil {
 		return nil, fmt.Errorf("ide cannot be nil")
@@ -52,7 +52,7 @@ func (g *IDE) Materialize(ctx context.Context, ide *adcp.Ide) (*adcp.Materialize
 		entries = append(entries, permEntries...)
 	}
 
-	// MCP servers -> .claude/mcp.local.json
+	// MCP servers -> .mcp.json
 	if ide.HasMcp() {
 		mcpEntries, err := g.materializeMcp(ide.GetMcp())
 		if err != nil {
@@ -120,7 +120,7 @@ func (g *IDE) materializeMcp(mcp *adcp.Mcp) ([]*adcp.MaterializedResult_Entry, e
 
 	// Read existing file content if it exists
 	existingContent := ""
-	mcpPath := ".claude/mcp.local.json"
+	mcpPath := ".mcp.json"
 	if data, err := os.ReadFile(mcpPath); err == nil {
 		existingContent = string(data)
 	}

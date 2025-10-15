@@ -137,7 +137,7 @@ func TestIDE_Materialize_Mcp(t *testing.T) {
 
 	var mcpContent string
 	for _, e := range res.GetEntries() {
-		if e.GetFile().GetPath() == ".claude/mcp.local.json" {
+		if e.GetFile().GetPath() == ".mcp.json" {
 			mcpContent = e.GetFile().GetContent()
 			break
 		}

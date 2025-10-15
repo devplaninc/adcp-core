@@ -254,7 +254,7 @@ func TestIDE_Materialize_Mcp_MergeWithExisting(t *testing.T) {
     }
   }
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "mcp.local.json"), []byte(existingMcp), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".mcp.json"), []byte(existingMcp), 0644))
 
 	// Define new MCP servers to merge
 	g := &IDE{}
@@ -271,7 +271,7 @@ func TestIDE_Materialize_Mcp_MergeWithExisting(t *testing.T) {
 
 	var mcpContent string
 	for _, e := range res.GetEntries() {
-		if e.GetFile().GetPath() == ".claude/mcp.local.json" {
+		if e.GetFile().GetPath() == ".mcp.json" {
 			mcpContent = e.GetFile().GetContent()
 			break
 		}
@@ -313,7 +313,7 @@ func TestIDE_Materialize_Mcp_InvalidExistingJSON(t *testing.T) {
 
 	// Create existing MCP file with invalid JSON
 	invalidJSON := `{ "mcpServers": { "test": }`
-	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "mcp.local.json"), []byte(invalidJSON), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".mcp.json"), []byte(invalidJSON), 0644))
 
 	// Define new MCP servers
 	g := &IDE{}
@@ -329,7 +329,7 @@ func TestIDE_Materialize_Mcp_InvalidExistingJSON(t *testing.T) {
 
 	var mcpContent string
 	for _, e := range res.GetEntries() {
-		if e.GetFile().GetPath() == ".claude/mcp.local.json" {
+		if e.GetFile().GetPath() == ".mcp.json" {
 			mcpContent = e.GetFile().GetContent()
 			break
 		}
