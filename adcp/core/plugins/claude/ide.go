@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	utils2 "github.com/devplaninc/adcp-core/adcp/core/utils"
 	"github.com/devplaninc/adcp/clients/go/adcp"
@@ -88,12 +89,19 @@ func (g *IDE) materializePermissions(perms *adcp.Permissions) ([]*adcp.Materiali
 		return entries, nil
 	}
 
-	settingsContent, err := buildClaudeSettingsJSON(perms)
+	// Read existing file content if it exists
+	existingContent := ""
+	settingsPath := ".claude/settings.local.json"
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		existingContent = string(data)
+	}
+
+	settingsContent, err := buildClaudeSettingsJSON(perms, existingContent)
 	if err != nil {
 		return nil, err
 	}
 	entries = append(entries, adcp.MaterializedResult_Entry_builder{
-		File: adcp.FullFileContent_builder{Path: ".claude/settings.local.json", Content: settingsContent}.Build(),
+		File: adcp.FullFileContent_builder{Path: settingsPath, Content: settingsContent}.Build(),
 	}.Build())
 	return entries, nil
 }
@@ -104,12 +112,19 @@ func (g *IDE) materializeMcp(mcp *adcp.Mcp) ([]*adcp.MaterializedResult_Entry, e
 		return entries, nil
 	}
 
-	mcpContent, err := buildClaudeMcpJSON(mcp)
+	// Read existing file content if it exists
+	existingContent := ""
+	mcpPath := ".claude/mcp.local.json"
+	if data, err := os.ReadFile(mcpPath); err == nil {
+		existingContent = string(data)
+	}
+
+	mcpContent, err := buildClaudeMcpJSON(mcp, existingContent)
 	if err != nil {
 		return nil, err
 	}
 	entries = append(entries, adcp.MaterializedResult_Entry_builder{
-		File: adcp.FullFileContent_builder{Path: ".claude/mcp.local.json", Content: mcpContent}.Build(),
+		File: adcp.FullFileContent_builder{Path: mcpPath, Content: mcpContent}.Build(),
 	}.Build())
 	return entries, nil
 }
@@ -145,29 +160,41 @@ type claudeMcp struct {
 	McpServers map[string]map[string]string `json:"mcpServers"`
 }
 
-func buildClaudeSettingsJSON(perms *adcp.Permissions) (string, error) {
+func buildClaudeSettingsJSON(perms *adcp.Permissions, existingContent string) (string, error) {
 	if perms == nil {
 		return "", fmt.Errorf("permissions cannot be nil")
 	}
 
 	var s claudeSettings
-	// ensure non-nil slices
-	s.Permissions.Allow = []string{}
-	s.Permissions.Deny = []string{}
-	s.Permissions.Ask = []string{}
 
+	// Parse existing content if provided
+	if existingContent != "" {
+		if err := json.Unmarshal([]byte(existingContent), &s); err != nil {
+			// If parsing fails, start fresh but log the error
+			s = claudeSettings{}
+		}
+	}
+
+	// Build new permissions from input
+	var newAllow []string
 	for _, p := range perms.GetAllow() {
-		if p == nil || !p.HasType() {
+		if !p.HasType() {
 			continue
 		}
-		s.Permissions.Allow = append(s.Permissions.Allow, formatPermission(p))
+		newAllow = append(newAllow, formatPermission(p))
 	}
+
+	var newDeny []string
 	for _, p := range perms.GetDeny() {
-		if p == nil || !p.HasType() {
+		if !p.HasType() {
 			continue
 		}
-		s.Permissions.Deny = append(s.Permissions.Deny, formatPermission(p))
+		newDeny = append(newDeny, formatPermission(p))
 	}
+
+	// Merge with existing permissions (deduplicate)
+	s.Permissions.Allow = mergeUniqueStrings(s.Permissions.Allow, newAllow)
+	s.Permissions.Deny = mergeUniqueStrings(s.Permissions.Deny, newDeny)
 
 	b, err := json.MarshalIndent(&s, "", "  ")
 	if err != nil {
@@ -176,12 +203,51 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions) (string, error) {
 	return string(b), nil
 }
 
-func buildClaudeMcpJSON(mcp *adcp.Mcp) (string, error) {
+// mergeUniqueStrings merges two string slices, removing duplicates
+func mergeUniqueStrings(existing, new []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	// Add existing items first
+	for _, s := range existing {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	// Add new items that aren't duplicates
+	for _, s := range new {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	return result
+}
+
+func buildClaudeMcpJSON(mcp *adcp.Mcp, existingContent string) (string, error) {
 	if mcp == nil {
 		return "", fmt.Errorf("mcp cannot be nil")
 	}
 
-	cm := claudeMcp{McpServers: map[string]map[string]string{}}
+	var cm claudeMcp
+
+	// Parse existing content if provided
+	if existingContent != "" {
+		if err := json.Unmarshal([]byte(existingContent), &cm); err != nil {
+			// If parsing fails, start fresh
+			cm = claudeMcp{}
+		}
+	}
+
+	// Ensure the map is initialized
+	if cm.McpServers == nil {
+		cm.McpServers = map[string]map[string]string{}
+	}
+
+	// Add or update servers from the new configuration
 	for name, s := range mcp.GetServers() {
 		if s == nil || !s.HasType() {
 			continue
