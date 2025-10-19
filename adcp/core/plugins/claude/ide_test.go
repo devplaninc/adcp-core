@@ -40,7 +40,6 @@ func TestIDE_Materialize_Commands_TextAndCmd(t *testing.T) {
 	res, err := g.Materialize(context.Background(), ide)
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Len(t, res.GetEntries(), 2)
 
 	// Verify contents
 	m := map[string]string{}
@@ -75,10 +74,18 @@ func TestIDE_Materialize_Command_Github(t *testing.T) {
 	res, err := g.Materialize(context.Background(), ide)
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	require.Len(t, res.GetEntries(), 1)
-	entry := res.GetEntries()[0]
-	assert.Equal(t, ".claude/commands/gh.md", entry.GetFile().GetPath())
-	assert.Equal(t, "from github", entry.GetFile().GetContent())
+	// Find the command entry for gh
+	var foundPath string
+	var foundContent string
+	for _, e := range res.GetEntries() {
+		if e.GetFile().GetPath() == ".claude/commands/gh.md" {
+			foundPath = e.GetFile().GetPath()
+			foundContent = e.GetFile().GetContent()
+			break
+		}
+	}
+	require.Equal(t, ".claude/commands/gh.md", foundPath)
+	assert.Equal(t, "from github", foundContent)
 }
 
 func TestIDE_Materialize_Permissions(t *testing.T) {
@@ -145,14 +152,57 @@ func TestIDE_Materialize_Mcp(t *testing.T) {
 	require.NotEmpty(t, mcpContent)
 
 	var parsed struct {
-		McpServers map[string]map[string]string `json:"mcpServers"`
+		McpServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
+			Url     string            `json:"url,omitempty"`
+		} `json:"mcpServers"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(mcpContent), &parsed))
 
 	require.Contains(t, parsed.McpServers, "github")
 	require.Contains(t, parsed.McpServers, "devplan")
-	assert.Equal(t, "https://api.githubcopilot.com/mcp/", parsed.McpServers["github"]["url"])
-	assert.Equal(t, "devplan mcp", parsed.McpServers["devplan"]["command"])
+	assert.Equal(t, "http", parsed.McpServers["github"].Type)
+	assert.Equal(t, "https://api.githubcopilot.com/mcp/", parsed.McpServers["github"].Url)
+	assert.Equal(t, "stdio", parsed.McpServers["devplan"].Type)
+	assert.Equal(t, "devplan", parsed.McpServers["devplan"].Command)
+	assert.Equal(t, []string{"mcp"}, parsed.McpServers["devplan"].Args)
+}
+
+func TestIDE_Materialize_Commands_AddedToAllow(t *testing.T) {
+	g := &IDE{}
+
+	ide := adcp.Ide_builder{
+		Commands: adcp.Commands_builder{Entries: []*adcp.Command{
+			adcp.Command_builder{Name: "refine", From: adcp.CommandFrom_builder{Text: strPtr("content1")}.Build()}.Build(),
+			adcp.Command_builder{Name: "run", From: adcp.CommandFrom_builder{Text: strPtr("content2")}.Build()}.Build(),
+		}}.Build(),
+	}.Build()
+
+	res, err := g.Materialize(context.Background(), ide)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// Find settings file
+	var settingsContent string
+	for _, e := range res.GetEntries() {
+		if e.GetFile().GetPath() == ".claude/settings.local.json" {
+			settingsContent = e.GetFile().GetContent()
+			break
+		}
+	}
+	require.NotEmpty(t, settingsContent)
+
+	var parsed struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(settingsContent), &parsed))
+	assert.Contains(t, parsed.Permissions.Allow, "SlashCommand(/refine)")
+	assert.Contains(t, parsed.Permissions.Allow, "SlashCommand(/run)")
 }
 
 func strPtr(s string) *string {

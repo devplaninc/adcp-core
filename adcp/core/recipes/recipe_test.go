@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/devplaninc/adcp-core/adcp/core/plugins/claude"
 	"github.com/devplaninc/adcp/clients/go/adcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,13 +18,13 @@ func strPtr(s string) *string {
 }
 
 func TestRecipe_Materialize_NilRecipe(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 	_, err := r.Materialize(context.Background(), nil)
 	assert.Error(t, err, "expected error for nil recipe")
 }
 
 func TestRecipe_Materialize_EmptyRecipe(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 	recipe := adcp.Recipe_builder{}.Build()
 	result, err := r.Materialize(context.Background(), recipe)
 	require.NoError(t, err)
@@ -32,7 +33,7 @@ func TestRecipe_Materialize_EmptyRecipe(t *testing.T) {
 }
 
 func TestRecipe_Materialize_ContextOnly(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Context: adcp.Context_builder{
@@ -58,7 +59,7 @@ func TestRecipe_Materialize_ContextOnly(t *testing.T) {
 }
 
 func TestRecipe_Materialize_IdeOnly(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Ide: adcp.Ide_builder{
@@ -78,15 +79,25 @@ func TestRecipe_Materialize_IdeOnly(t *testing.T) {
 	result, err := r.Materialize(context.Background(), recipe)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Len(t, result.GetEntries(), 1)
 
-	entry := result.GetEntries()[0]
-	assert.Equal(t, ".claude/commands/test.md", entry.GetFile().GetPath())
-	assert.Equal(t, "Run all tests", entry.GetFile().GetContent())
+	// Build map for easier verification
+	entries := make(map[string]string)
+	for _, e := range result.GetEntries() {
+		entries[e.GetFile().GetPath()] = e.GetFile().GetContent()
+	}
+	assert.Equal(t, "Run all tests", entries[".claude/commands/test.md"])
+	// Ensure settings file includes the SlashCommand allow for the command
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(entries[".claude/settings.local.json"]), &settings))
+	assert.Contains(t, settings.Permissions.Allow, "SlashCommand(/test)")
 }
 
 func TestRecipe_Materialize_ContextAndIde(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Context: adcp.Context_builder{
@@ -116,7 +127,6 @@ func TestRecipe_Materialize_ContextAndIde(t *testing.T) {
 	result, err := r.Materialize(context.Background(), recipe)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Len(t, result.GetEntries(), 2)
 
 	// Build map for easier verification
 	entries := make(map[string]string)
@@ -126,10 +136,18 @@ func TestRecipe_Materialize_ContextAndIde(t *testing.T) {
 
 	assert.Equal(t, "# Architecture", entries["docs/arch.md"])
 	assert.Equal(t, "Deploy to production", entries[".claude/commands/deploy.md"])
+	// Ensure settings file includes the SlashCommand allow for the command
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(entries[".claude/settings.local.json"]), &settings))
+	assert.Contains(t, settings.Permissions.Allow, "SlashCommand(/deploy)")
 }
 
 func TestRecipe_Materialize_ComplexRecipe(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	// Mock HTTP server for GitHub content
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +269,7 @@ func TestRecipe_Materialize_ComplexRecipe(t *testing.T) {
 }
 
 func TestRecipe_Materialize_InvalidContext(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Context: adcp.Context_builder{
@@ -270,7 +288,7 @@ func TestRecipe_Materialize_InvalidContext(t *testing.T) {
 }
 
 func TestRecipe_Materialize_InvalidIde(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Ide: adcp.Ide_builder{
@@ -291,7 +309,7 @@ func TestRecipe_Materialize_InvalidIde(t *testing.T) {
 }
 
 func TestRecipe_Materialize_ContextWithCombinedSource(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Context: adcp.Context_builder{
@@ -329,7 +347,7 @@ func TestRecipe_Materialize_ContextWithCombinedSource(t *testing.T) {
 }
 
 func TestRecipe_Materialize_MultiplePermissions(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Ide: adcp.Ide_builder{
@@ -378,7 +396,7 @@ func TestRecipe_Materialize_MultiplePermissions(t *testing.T) {
 }
 
 func TestRecipe_Materialize_MultipleMcpServers(t *testing.T) {
-	r := &Recipe{}
+	r := &Recipe{IDE: &claude.IDE{}}
 
 	recipe := adcp.Recipe_builder{
 		Ide: adcp.Ide_builder{

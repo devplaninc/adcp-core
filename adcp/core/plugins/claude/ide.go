@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	utils2 "github.com/devplaninc/adcp-core/adcp/core/utils"
 	"github.com/devplaninc/adcp/clients/go/adcp"
@@ -41,11 +42,20 @@ func (g *IDE) Materialize(ctx context.Context, ide *adcp.Ide) (*adcp.Materialize
 			mcpServerNames = append(mcpServerNames, name)
 		}
 	}
+	// Extract command names for permissions
+	var commandNames []string
+	if ide.HasCommands() {
+		for _, c := range ide.GetCommands().GetEntries() {
+			if c != nil && c.GetName() != "" {
+				commandNames = append(commandNames, c.GetName())
+			}
+		}
+	}
 
-	// Permissions -> .claude/settings.local.json (including MCP server permissions)
-	if ide.HasPermissions() || len(mcpServerNames) > 0 {
+	// Permissions -> .claude/settings.local.json (including MCP server and command permissions)
+	if ide.HasPermissions() || len(mcpServerNames) > 0 || ide.HasCommands() {
 		perms := ide.GetPermissions()
-		permEntries, err := g.materializePermissions(perms, mcpServerNames)
+		permEntries, err := g.materializePermissions(perms, mcpServerNames, commandNames)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +102,7 @@ func (g *IDE) materializeCommands(ctx context.Context, commands *adcp.Commands) 
 	return entries, nil
 }
 
-func (g *IDE) materializePermissions(perms *adcp.Permissions, mcpServerNames []string) ([]*adcp.MaterializedResult_Entry, error) {
+func (g *IDE) materializePermissions(perms *adcp.Permissions, mcpServerNames []string, commandNames []string) ([]*adcp.MaterializedResult_Entry, error) {
 	var entries []*adcp.MaterializedResult_Entry
 
 	// Read existing file content if it exists
@@ -102,7 +112,7 @@ func (g *IDE) materializePermissions(perms *adcp.Permissions, mcpServerNames []s
 		existingContent = string(data)
 	}
 
-	settingsContent, err := buildClaudeSettingsJSON(perms, mcpServerNames, existingContent)
+	settingsContent, err := buildClaudeSettingsJSON(perms, mcpServerNames, commandNames, existingContent)
 	if err != nil {
 		return nil, err
 	}
@@ -156,18 +166,28 @@ func (g *IDE) fetchCommandContent(ctx context.Context, from *adcp.CommandFrom) (
 
 type claudeSettings struct {
 	Permissions struct {
-		Allow []string `json:"allow"`
-		Deny  []string `json:"deny"`
-		Ask   []string `json:"ask"`
+		Allow       []string `json:"allow,omitempty"`
+		Deny        []string `json:"deny,omitempty"`
+		Ask         []string `json:"ask,omitempty"`
+		DefaultMode string   `json:"defaultMode,omitempty"`
 	} `json:"permissions"`
-	EnabledMcpjsonServers []string `json:"enabledMcpjsonServers,omitempty"`
+	EnabledMcpjsonServers      []string `json:"enabledMcpjsonServers,omitempty"`
+	EnableAllProjectMcpServers bool     `json:"enableAllProjectMcpServers,omitempty"`
+}
+
+type mcpServerConfig struct {
+	Type    string            `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Url     string            `json:"url,omitempty"`
 }
 
 type claudeMcp struct {
-	McpServers map[string]map[string]string `json:"mcpServers"`
+	McpServers map[string]mcpServerConfig `json:"mcpServers"`
 }
 
-func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, existingContent string) (string, error) {
+func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, commandNames []string, existingContent string) (string, error) {
 	var s claudeSettings
 
 	// Parse existing content if provided
@@ -188,12 +208,14 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, e
 	if s.Permissions.Ask == nil {
 		s.Permissions.Ask = []string{}
 	}
+	s.Permissions.DefaultMode = "acceptEdits"
 	if s.EnabledMcpjsonServers == nil {
 		s.EnabledMcpjsonServers = []string{}
 	}
+	s.EnableAllProjectMcpServers = true
 
 	// Build new permissions from input
-	var newAllow []string
+	newAllow := make([]string, 0)
 	if perms != nil {
 		for _, p := range perms.GetAllow() {
 			if !p.HasType() {
@@ -203,7 +225,7 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, e
 		}
 	}
 
-	var newDeny []string
+	newDeny := make([]string, 0)
 	if perms != nil {
 		for _, p := range perms.GetDeny() {
 			if !p.HasType() {
@@ -219,6 +241,15 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, e
 		mcpAllowPermissions = append(mcpAllowPermissions, fmt.Sprintf("mcp__%s", serverName))
 	}
 	newAllow = append(newAllow, mcpAllowPermissions...)
+
+	// Add SlashCommand permissions for each command
+	var cmdAllow []string
+	for _, name := range commandNames {
+		if name != "" {
+			cmdAllow = append(cmdAllow, fmt.Sprintf("SlashCommand(/%s)", name))
+		}
+	}
+	newAllow = append(newAllow, cmdAllow...)
 
 	// Merge with existing permissions (deduplicate)
 	s.Permissions.Allow = mergeUniqueStrings(s.Permissions.Allow, newAllow)
@@ -237,7 +268,7 @@ func buildClaudeSettingsJSON(perms *adcp.Permissions, mcpServerNames []string, e
 // mergeUniqueStrings merges two string slices, removing duplicates
 func mergeUniqueStrings(existing, new []string) []string {
 	seen := make(map[string]bool)
-	var result []string
+	result := make([]string, 0)
 
 	// Add existing items first
 	for _, s := range existing {
@@ -275,7 +306,7 @@ func buildClaudeMcpJSON(mcp *adcp.Mcp, existingContent string) (string, error) {
 
 	// Ensure the map is initialized
 	if cm.McpServers == nil {
-		cm.McpServers = map[string]map[string]string{}
+		cm.McpServers = map[string]mcpServerConfig{}
 	}
 
 	// Add or update servers from the new configuration
@@ -283,18 +314,33 @@ func buildClaudeMcpJSON(mcp *adcp.Mcp, existingContent string) (string, error) {
 		if s == nil || !s.HasType() {
 			continue
 		}
-		srv := map[string]string{}
+		var srv mcpServerConfig
 		switch s.WhichType() {
 		case adcp.McpServer_Http_case:
 			if s.GetHttp() != nil {
-				srv["url"] = s.GetHttp().GetUrl()
+				srv.Type = "http"
+				srv.Url = s.GetHttp().GetUrl()
 			}
 		case adcp.McpServer_Stdio_case:
 			if s.GetStdio() != nil {
-				srv["command"] = s.GetStdio().GetCommand()
+				srv.Type = "stdio"
+				cmd := s.GetStdio().GetCommand()
+				// Split command into the executable and args by whitespace
+				if cmd != "" {
+					parts := strings.Fields(cmd)
+					if len(parts) > 0 {
+						srv.Command = parts[0]
+						if len(parts) > 1 {
+							srv.Args = parts[1:]
+						}
+					}
+				}
+				// Always include an env object for stdio servers
+				srv.Env = map[string]string{}
 			}
 		}
-		if len(srv) > 0 {
+		// If we set at least a type, keep the server
+		if srv.Type != "" || srv.Url != "" || srv.Command != "" {
 			cm.McpServers[name] = srv
 		}
 	}

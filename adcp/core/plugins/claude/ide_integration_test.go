@@ -279,21 +279,30 @@ func TestIDE_Materialize_Mcp_MergeWithExisting(t *testing.T) {
 	require.NotEmpty(t, mcpContent)
 
 	var parsed struct {
-		McpServers map[string]map[string]string `json:"mcpServers"`
+		McpServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
+			Url     string            `json:"url,omitempty"`
+		} `json:"mcpServers"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(mcpContent), &parsed))
 
 	// Verify existing server not in new config is preserved
 	require.Contains(t, parsed.McpServers, "filesystem", "existing server not in new config should be preserved")
-	assert.Equal(t, "npx @modelcontextprotocol/server-filesystem", parsed.McpServers["filesystem"]["command"])
+	assert.Equal(t, "npx @modelcontextprotocol/server-filesystem", parsed.McpServers["filesystem"].Command)
 
 	// Verify existing server in new config is updated
 	require.Contains(t, parsed.McpServers, "github", "existing server should be updated")
-	assert.Equal(t, "https://api.githubcopilot.com/mcp/", parsed.McpServers["github"]["url"], "github server should be updated")
+	assert.Equal(t, "http", parsed.McpServers["github"].Type)
+	assert.Equal(t, "https://api.githubcopilot.com/mcp/", parsed.McpServers["github"].Url, "github server should be updated")
 
 	// Verify new server is added
 	require.Contains(t, parsed.McpServers, "devplan", "new server should be added")
-	assert.Equal(t, "devplan mcp", parsed.McpServers["devplan"]["command"])
+	assert.Equal(t, "stdio", parsed.McpServers["devplan"].Type)
+	assert.Equal(t, "devplan", parsed.McpServers["devplan"].Command)
+	assert.Equal(t, []string{"mcp"}, parsed.McpServers["devplan"].Args)
 
 	// Verify total count
 	assert.Len(t, parsed.McpServers, 3, "should have 3 servers total")
@@ -337,14 +346,22 @@ func TestIDE_Materialize_Mcp_InvalidExistingJSON(t *testing.T) {
 	require.NotEmpty(t, mcpContent)
 
 	var parsed struct {
-		McpServers map[string]map[string]string `json:"mcpServers"`
+		McpServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
+			Url     string            `json:"url,omitempty"`
+		} `json:"mcpServers"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(mcpContent), &parsed))
 
 	// Should only have new server
 	assert.Len(t, parsed.McpServers, 1)
 	require.Contains(t, parsed.McpServers, "devplan")
-	assert.Equal(t, "devplan mcp", parsed.McpServers["devplan"]["command"])
+	assert.Equal(t, "stdio", parsed.McpServers["devplan"].Type)
+	assert.Equal(t, "devplan", parsed.McpServers["devplan"].Command)
+	assert.Equal(t, []string{"mcp"}, parsed.McpServers["devplan"].Args)
 }
 
 func TestIDE_Materialize_Permissions_NoExistingFile(t *testing.T) {

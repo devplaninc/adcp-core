@@ -6,12 +6,13 @@ import (
 
 	"github.com/devplaninc/adcp-core/adcp/core"
 	"github.com/devplaninc/adcp-core/adcp/core/generators"
-	"github.com/devplaninc/adcp-core/adcp/core/plugins/claude"
 	"github.com/devplaninc/adcp-core/adcp/core/prefetch"
 	"github.com/devplaninc/adcp/clients/go/adcp"
 )
 
-type Recipe struct{}
+type Recipe struct {
+	IDE IDEProvider
+}
 
 func (r *Recipe) Materialize(ctx context.Context, recipe *adcp.Recipe) (*adcp.MaterializedResult, error) {
 	if recipe == nil {
@@ -41,8 +42,7 @@ func (r *Recipe) Materialize(ctx context.Context, recipe *adcp.Recipe) (*adcp.Ma
 
 	// Materialize IDE configuration if present
 	if recipe.HasIde() {
-		ideGen := &claude.IDE{}
-		ideResult, err := ideGen.Materialize(ctx, recipe.GetIde())
+		ideResult, err := r.IDE.Materialize(ctx, recipe.GetIde())
 		if err != nil {
 			return nil, fmt.Errorf("failed to materialize IDE configuration: %w", err)
 		}
