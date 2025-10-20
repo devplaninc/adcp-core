@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 // - Skips entries that do not contain a file.
 // - Rejects paths that escape the provided root via path traversal.
 func PersistMaterializedResult(_ context.Context, root string, result *adcp.MaterializedResult) error {
+	log := slog.With("op", "PersistMaterializedResult")
 	if strings.TrimSpace(root) == "" {
 		return fmt.Errorf("root path cannot be empty")
 	}
@@ -63,11 +65,13 @@ func PersistMaterializedResult(_ context.Context, root string, result *adcp.Mate
 
 		// Create parent directories.
 		dir := filepath.Dir(full)
+		log.Debug("Creating directory", "dir", dir)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("entry %d: failed to create directories for %s: %w", i, full, err)
 		}
 
 		// Write file (overwrite if exists).
+		log.Debug("Writing file", "rel", rel, "full", full)
 		if err := os.WriteFile(full, []byte(f.GetContent()), 0o644); err != nil {
 			return fmt.Errorf("entry %d: failed to write file %s: %w", i, full, err)
 		}
